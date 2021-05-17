@@ -1,11 +1,14 @@
-import csv
-
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.metrics.pairwise import linear_kernel
 from flask import Flask, jsonify
 import pymysql
 import pandas as pd
 import numpy as np
+from numpy.linalg import norm
 from sklearn.metrics.pairwise import cosine_similarity
 from flask_cors import CORS
+import nltk
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 app = Flask(__name__)
 CORS(app)
@@ -13,11 +16,24 @@ CORS(app)
 conn=pymysql.connect(host='localhost',user='root',password='',database='pcd')
 cursor=conn.cursor()
 query1='select id,rating from freelancer'
-query2='select id,average_payment,technologies,id_client from missions where hired=0'
+query2='select id,average_payment,technologies,id_client from missions where hired=0' #to change
 query3='select * from client'
 query4='select name from skills'
 query5='select * from skilled'
 
+
+nltk.download('vader_lexicon')
+sid = SentimentIntensityAnalyzer()
+#tfId Vectorization example
+def tfId():
+  ds = pd.read_csv("Data/skills.csv")
+  print(ds)
+  countvectorizer = CountVectorizer(analyzer='word', stop_words='english')
+  count_wm = countvectorizer.fit_transform(ds)
+  count_tokens = countvectorizer.get_feature_names()
+  df_countvect = pd.DataFrame(data=count_wm.toarray(), index=['Skills'], columns=count_tokens)
+  print("Count Vectorizer\n")
+  print(df_countvect)
 #defining a list containing all the name skills presented on the table skills
 def generateSkillsList():
   try :
@@ -39,13 +55,14 @@ def generateNonHiredMissionMatrix():
     missions=cursor.fetchall()
 
     VectorMissionHeader=["idMission"]
+    for skill in skills :
+      VectorMissionHeader.append(skill)
+    VectorMissionHeader.append('ratingClient')
     MissionMatrix1=[]
     for mission in missions :
       MissionVector=[mission[0]]
       technologies=mission[2].split("/") #I should verify the number of column technologies on table mission
-
       for skill in skills:
-         VectorMissionHeader.append(skill)
          if skill in technologies :
            MissionVector.append(1)
          else :
@@ -54,9 +71,10 @@ def generateNonHiredMissionMatrix():
       cursor.execute(query6,mission[3])
       result=cursor.fetchall()
       rating=result[0][0]
-      VectorMissionHeader.append('ratingClient')
+
       MissionVector.append(rating)
       MissionMatrix1.append(MissionVector)
+
     MissionMatrix=np.array(MissionMatrix1)
     print(VectorMissionHeader)
     print(MissionMatrix)
@@ -95,7 +113,7 @@ def generateFreelancersMatrix():
 
       freelancerList.append(freelancer[1])
 
-      embeddedquery='select count(id) from missions where completed=true and id_freelancer=%s'
+      embeddedquery='select count(id) from missions where completed=true and id_freelancer=%s' #to change
       cursor.execute(embeddedquery,freelancer[0])
       result2=cursor.fetchall()
 
@@ -108,20 +126,7 @@ def generateFreelancersMatrix():
     return freelancersMatrix1
   except:
     print("Error in generate Freelancers Matrix")
-freelancers= {
-  "data": [
-    {
-      "name":"Khawla",
-      "firstName":"Ezzina",
-      "job":"web developper"
-    },
-    {
-      "name": "Nirmine",
-      "firstName": "Khaled",
-      "job": "web developper"
-    }
-  ]
-}
+
 
 def calculRatingNombreProjetFactor(rating,nombreProjet,similarity):
   return 0.37*rating+0.3*nombreProjet+0.33*similarity
@@ -135,10 +140,6 @@ def calculOfferId(Matrix):
 def hello_world():
     return 'Hello World!'
 
-@app.route('/freelancers/',methods=['GET'])
-def freelancersReport():
-  global freelancers
-  return jsonify([freelancers])
 #recommand offers to a particular freelancer
 @app.route('/recommandOffer/<idfreelancer>',methods=['GET','POST'])
 def recommandOffers(idfreelancer):
@@ -173,14 +174,16 @@ def recommandOffers(idfreelancer):
       newFreelancerVector.append(int(i))
     SimilarityList=[]
     MissionMatrix=generateNonHiredMissionMatrix()
+
     for mission in MissionMatrix :
       shape=np.shape(mission)
       nombreColonne=shape[0]
 
       result=np.dot(newFreelancerVector[1:],mission[1:nombreColonne-1])
-
+      #result=cosine_similarity(newFreelancerVector[1:],mission[1:nombreColonne-1])
       SimilarityList.append(result)
-
+    #Similarity=cosine_similarity(newFreelancerVector.toarray(),MissionMatrix,True)
+    #print(Similarity)
     SelectedMissions=[]
     j=0
     for mission in MissionMatrix:
@@ -195,11 +198,15 @@ def recommandOffers(idfreelancer):
     print(SortedSelectedMission)
     OffersId=calculOfferId(SortedSelectedMission)
     print(OffersId)
-
-    return jsonify(OffersId)
+    dictionnaire= {
+        'titre':'les missions recommandees pour un freelancer',
+        'liste':OffersId
+    }
+    return jsonify(dictionnaire)
   except:
     print("Error in recommand offers for a freelancer")
-    return 'Error'
+    return jsonify("bonjour")
+
 #recommmand freelancers to a particular mission
 @app.route('/recommandfreelancer/<idMission>',methods=['GET','POST'])
 def recommandfreelancers(idMission):
@@ -237,34 +244,47 @@ def recommandfreelancers(idMission):
       SimilarityList.append(int(result))
     print(freelancersMatrix)
     i=0
+    Selectedfreelancers=[]
+    NewSimilarityList=[]
+    for freelancer in freelancersMatrix:
+      if SimilarityList[i]>=1.0 :
+        Selectedfreelancers.append(freelancer)
+        NewSimilarityList.append(SimilarityList[i])
+      i+=1
   #We will replace the two last columns (rating,nbPorject,SimilarityList) for each row in SelectedFreelancers by the factor calculated and put the result in a new matrix
     NewFreelancersMatrix=[]
     NewHeaders=['idFreelancer']
     for skill in skills :
       NewHeaders.append(skill)
     NewHeaders.append('CalculatedFactor')
-    for freelancer in freelancersMatrix:
+    j=0
+    for freelancer in Selectedfreelancers:
 
 
       print(len(freelancer))
       freelancerInfo=freelancer[0:len(freelancer)-2].tolist()
       print(freelancerInfo)
-      queryLanguages='select count(id_language) from speak where id_freelancer=%s'
-      cursor.execute(queryLanguages,int(freelancerInfo[0]))
-      numberOfLanguagesSpeaked=cursor.fetchall()[0][0]
-      calculatedfactor=calculRatingNombreProjetFactor(freelancer[-2],freelancer[-1],SimilarityList[i])
+
+      calculatedfactor=calculRatingNombreProjetFactor(freelancer[-2],freelancer[-1],SimilarityList[j])
       freelancerInfo.append(calculatedfactor)
       NewFreelancersMatrix.append(freelancerInfo)
-      i+=1
+      j+=1
     print(NewHeaders)
     print(NewFreelancersMatrix)
     index=len(NewFreelancersMatrix[0])-1
     SortedSelectedfreelancers = sorted(NewFreelancersMatrix,key=lambda freelancer: freelancer[index], reverse=True)
     freelancersId=[int(freelancer[0]) for freelancer in SortedSelectedfreelancers]
     print(freelancersId)
-    return jsonify(freelancersId)
+    dictionnaire= {
+        'titre':'les freelancers recommandees pour une mission',
+        'liste':freelancersId
+    }
+    return jsonify(dictionnaire)
+
   except:
     print("Error on recommand freealncers for an offer")
     return 'Error'
+
 if __name__ == '__main__':
     app.run()
+
