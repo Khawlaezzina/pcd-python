@@ -276,7 +276,7 @@ def recommandfreelancers(idMission):
     freelancersId=[int(freelancer[0]) for freelancer in SortedSelectedfreelancers]
     print(freelancersId)
     dictionnaire= {
-        'titre':'les freelancers recommandees pour une mission',
+        'titre':'les freelancers recommandees pour cette mission',
         'liste':freelancersId
     }
     return jsonify(dictionnaire)
