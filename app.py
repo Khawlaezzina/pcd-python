@@ -1,3 +1,5 @@
+import math
+
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 from flask import Flask, jsonify
@@ -13,7 +15,7 @@ from nltk.sentiment.vader import SentimentIntensityAnalyzer
 app = Flask(__name__)
 CORS(app)
 
-conn=pymysql.connect(host='localhost',user='root',password='',database='pcd')
+conn=pymysql.connect(host='localhost',user='root',password='',database='pcd',autocommit=True)
 cursor=conn.cursor()
 query1='select id,rating from freelancer'
 query2='select id,average_payment,technologies,id_client from missions where hired=0' #to change
@@ -23,7 +25,7 @@ query5='select * from skilled'
 
 
 nltk.download('vader_lexicon')
-sid = SentimentIntensityAnalyzer()
+analyzer = SentimentIntensityAnalyzer()
 #tfId Vectorization example
 def tfId():
   ds = pd.read_csv("Data/skills.csv")
@@ -206,7 +208,9 @@ def recommandOffers(idfreelancer):
   except:
     print("Error in recommand offers for a freelancer")
     return jsonify("bonjour")
-
+  finally:
+    cursor.close()
+    conn.close()
 #recommmand freelancers to a particular mission
 @app.route('/recommandfreelancer/<idMission>',methods=['GET','POST'])
 def recommandfreelancers(idMission):
@@ -284,7 +288,96 @@ def recommandfreelancers(idMission):
   except:
     print("Error on recommand freealncers for an offer")
     return 'Error'
+  finally:
+    cursor.close()
+    conn.close()
+#update client rating
+@app.route('/updateClientRating/<idClient>',methods=['GET','POST'])
+def updateClientRating(idClient):
+  try:
+    reviews='select id_freelancer,comment_freelancer from reviews where id_client=%s'
+    cursor.execute(reviews,idClient)
+    results=cursor.fetchall()
+    clientReviews=[]
+    idFreelancers=[]
+    scores=[]
+    for result in results:
+      clientReviews.append(result[1])
+      idFreelancers.append(result[0])
+    print(clientReviews)
+    print(idFreelancers)
+    if clientReviews==[] :
+      rating=0
+    else:
+      for review in clientReviews:
+        print(analyzer.polarity_scores(review)['compound'])
+        scores.append(analyzer.polarity_scores(review)['compound'])
+      print(scores)
+      scoremoyen=np.mean(scores)
+      rating=math.ceil(scoremoyen/5)   #calculer le nombre des étoiles à attribuer sur 5 pour un client
+      print(rating)
+    update='update client set rating=%s where id=%s'
+    val=(rating,int(idClient))
+    cursor.execute(update,val)
+    print('Doneee !!!!')
+    dictionnaire= {
+      'New rating':rating,
+      'freelancersId':idFreelancers,
+      'Reviews ':clientReviews
+    }
+    return jsonify(dictionnaire)
+  except:
+      print('error in update client rating')
+      return 'error'
+  finally:
+    cursor.close()
+    conn.close()
+#update freelancer rating
+@app.route('/upadateFreelancerRating/<idFreelancer>',methods=['GET','POST'])
+def updatefreelancerrating(idFreelancer):
+  try :
+    reviews='select id_client,comment_client from reviews where id_freelancer=%s'
+    cursor.execute(reviews,idFreelancer)
+    results=cursor.fetchall()
+    print(results)
+    freelancerReviews=[]
+    idClients=[]
+    scores=[]
+    for result in results:
+      freelancerReviews.append(result[1])
+      idClients.append(result[0])
+    print(freelancerReviews)
+    print(idClients)
+    if freelancerReviews==[]:
+      rating=0
+    else:
+      for review in freelancerReviews:
+        print(analyzer.polarity_scores(review)['compound'])
+        scores.append(analyzer.polarity_scores(review)['compound'])
+      print(scores)
+      MoyScore=np.mean(scores)
+      print(MoyScore)
+      rating=math.ceil(MoyScore/5)  #calculer le nombre des étoiles à attribuer sur 5 pour le freelancer
+      print(rating)
+    update='update freelancer set rating=%s where id=%s'
+    val=(rating,int(idFreelancer))
+    cursor.execute(update,val)
+    #conn.commit()
+    print('Hello')
+    dictionnaire = {
+      'Reviews': freelancerReviews,
+      'idClients':idClients,
+      'rating':rating
+    }
+    print('Update done successfully')
+    return jsonify(dictionnaire)
 
+  except:
+    print('Error on update freelancer rating')
+    return jsonify('ERROR')
+  finally:
+    cursor.close()
+    conn.close()
 if __name__ == '__main__':
     app.run()
 
